@@ -12,6 +12,7 @@ import br.edu.ifgoiano.grpc.TurmaGrpcServiceGrpc;
 
 import net.devh.boot.grpc.client.inject.GrpcClient;
 import org.springframework.stereotype.Service;
+import br.edu.ifgoiano.academico.matricula_service.client.AlunoClient;
 
 import java.util.List;
 
@@ -20,50 +21,32 @@ public class MatriculaService {
 
     private final MatriculaRepository matriculaRepository;
 
-    @GrpcClient("turma-service")
-    private TurmaGrpcServiceGrpc.TurmaGrpcServiceBlockingStub turmaGrpcStub;
-
-    public MatriculaService(MatriculaRepository matriculaRepository) {
+    public MatriculaService(MatriculaRepository matriculaRepository, AlunoClient alunoClient) {
         this.matriculaRepository = matriculaRepository;
+        this.alunoClient = alunoClient;
     }
 
     public Matricula criarMatricula(Long alunoId, Long turmaId) {
-        boolean jaExisteMatriculaAtiva =
-                matriculaRepository.existsByAlunoIdAndTurmaIdAndStatus(
-                        alunoId,
-                        turmaId,
-                        StatusMatricula.ATIVA
-                );
+    boolean alunoExiste = alunoClient.alunoExiste(alunoId);
 
-        if (jaExisteMatriculaAtiva) {
-            throw new IllegalStateException("Aluno já possui matrícula ativa nesta turma.");
-        }
+    if (!alunoExiste) {
+        throw new IllegalStateException("Aluno informado não existe.");
+    }
 
-        // Reserva a vaga na turma via gRPC antes de efetivar a matrícula
-        ReservaVagaResponse reserva = turmaGrpcStub.reservarVaga(
-                ReservaVagaRequest.newBuilder()
-                        .setTurmaId(turmaId)
-                        .build()
-        );
-
-        if (!reserva.getSucesso()) {
-            throw new IllegalStateException(
-                    "Não foi possível reservar vaga na turma: " + reserva.getMensagem()
+    boolean jaExisteMatriculaAtiva =
+            matriculaRepository.existsByAlunoIdAndTurmaIdAndStatus(
+                    alunoId,
+                    turmaId,
+                    StatusMatricula.ATIVA
             );
-        }
 
-        try {
-            Matricula matricula = new Matricula(alunoId, turmaId);
-            return matriculaRepository.save(matricula);
-        } catch (RuntimeException ex) {
-            // Compensa a reserva caso a persistência da matrícula falhe
-            turmaGrpcStub.liberarVaga(
-                    LiberaVagaRequest.newBuilder()
-                            .setTurmaId(turmaId)
-                            .build()
-            );
-            throw ex;
-        }
+    if (jaExisteMatriculaAtiva) {
+        throw new IllegalStateException("Aluno já possui matrícula ativa nesta turma.");
+    }
+
+        Matricula matricula = new Matricula(alunoId, turmaId);
+
+        return matriculaRepository.save(matricula);
     }
 
     public List<Matricula> listarTodas() {
@@ -83,11 +66,9 @@ public class MatriculaService {
                 .findByAlunoIdAndTurmaIdAndStatus(
                         alunoId,
                         turmaId,
-                        StatusMatricula.ATIVA
-                )
+                        StatusMatricula.ATIVA)
                 .orElseThrow(() -> new IllegalStateException(
-                        "Não existe matrícula ativa para este aluno nesta turma."
-                ));
+                        "Não existe matrícula ativa para este aluno nesta turma."));
 
         matricula.cancelar();
         Matricula matriculaCancelada = matriculaRepository.save(matricula);
