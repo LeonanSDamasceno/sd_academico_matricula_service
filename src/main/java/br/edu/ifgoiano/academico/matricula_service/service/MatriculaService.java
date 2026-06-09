@@ -3,6 +3,14 @@ package br.edu.ifgoiano.academico.matricula_service.service;
 import br.edu.ifgoiano.academico.matricula_service.model.Matricula;
 import br.edu.ifgoiano.academico.matricula_service.model.StatusMatricula;
 import br.edu.ifgoiano.academico.matricula_service.repository.MatriculaRepository;
+
+import br.edu.ifgoiano.grpc.LiberaVagaRequest;
+import br.edu.ifgoiano.grpc.LiberaVagaResponse;
+import br.edu.ifgoiano.grpc.ReservaVagaRequest;
+import br.edu.ifgoiano.grpc.ReservaVagaResponse;
+import br.edu.ifgoiano.grpc.TurmaGrpcServiceGrpc;
+
+import net.devh.boot.grpc.client.inject.GrpcClient;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -11,6 +19,9 @@ import java.util.List;
 public class MatriculaService {
 
     private final MatriculaRepository matriculaRepository;
+
+    @GrpcClient("turma-service")
+    private TurmaGrpcServiceGrpc.TurmaGrpcServiceBlockingStub turmaGrpcStub;
 
     public MatriculaService(MatriculaRepository matriculaRepository) {
         this.matriculaRepository = matriculaRepository;
@@ -28,9 +39,31 @@ public class MatriculaService {
             throw new IllegalStateException("Aluno já possui matrícula ativa nesta turma.");
         }
 
-        Matricula matricula = new Matricula(alunoId, turmaId);
+        // Reserva a vaga na turma via gRPC antes de efetivar a matrícula
+        ReservaVagaResponse reserva = turmaGrpcStub.reservarVaga(
+                ReservaVagaRequest.newBuilder()
+                        .setTurmaId(turmaId)
+                        .build()
+        );
 
-        return matriculaRepository.save(matricula);
+        if (!reserva.getSucesso()) {
+            throw new IllegalStateException(
+                    "Não foi possível reservar vaga na turma: " + reserva.getMensagem()
+            );
+        }
+
+        try {
+            Matricula matricula = new Matricula(alunoId, turmaId);
+            return matriculaRepository.save(matricula);
+        } catch (RuntimeException ex) {
+            // Compensa a reserva caso a persistência da matrícula falhe
+            turmaGrpcStub.liberarVaga(
+                    LiberaVagaRequest.newBuilder()
+                            .setTurmaId(turmaId)
+                            .build()
+            );
+            throw ex;
+        }
     }
 
     public List<Matricula> listarTodas() {
@@ -57,7 +90,23 @@ public class MatriculaService {
                 ));
 
         matricula.cancelar();
+        Matricula matriculaCancelada = matriculaRepository.save(matricula);
 
-        return matriculaRepository.save(matricula);
+        // Libera a vaga na turma via gRPC após cancelar a matrícula
+        LiberaVagaResponse liberacao = turmaGrpcStub.liberarVaga(
+                LiberaVagaRequest.newBuilder()
+                        .setTurmaId(turmaId)
+                        .build()
+        );
+
+        if (!liberacao.getSucesso()) {
+            // Não reverte o cancelamento; apenas registra a inconsistência
+            System.err.println(
+                    "Aviso: falha ao liberar vaga na turma " + turmaId
+                            + ": " + liberacao.getMensagem()
+            );
+        }
+
+        return matriculaCancelada;
     }
 }
