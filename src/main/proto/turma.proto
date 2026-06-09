@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "br.edu.ifgoiano.grpc";
+option java_outer_classname = "TurmaProto";
+
+service TurmaGrpcService {
+
+  rpc ReservarVaga (ReservaVagaRequest)
+      returns (ReservaVagaResponse);
+
+  rpc LiberarVaga (LiberaVagaRequest)
+      returns (LiberaVagaResponse);
+}
+
+message ReservaVagaRequest {
+  int64 turmaId = 1;
+}
+
+message ReservaVagaResponse {
+  bool sucesso = 1;
+  string mensagem = 2;
+}
+
+message LiberaVagaRequest {
+  int64 turmaId = 1;
+}
+
+message LiberaVagaResponse {
+  bool sucesso = 1;
+  string mensagem = 2;
+}
