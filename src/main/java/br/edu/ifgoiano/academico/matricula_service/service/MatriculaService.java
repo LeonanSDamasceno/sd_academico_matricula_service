@@ -13,6 +13,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import br.edu.ifgoiano.academico.matricula_service.client.AlunoClient;
 
+import br.edu.ifgoiano.academico.matricula_service.service.exception.AlunoServiceIndisponivelException;
+import feign.FeignException;
+
 import java.util.List;
 
 @Service
@@ -34,8 +37,8 @@ public class MatriculaService {
     }
 
     public Matricula criarMatricula(Long alunoId, Long turmaId) {
-    boolean alunoExiste = alunoClient.alunoExiste(alunoId);
-
+    boolean alunoExiste = consultarExistenciaAluno(alunoId);
+        //verifica se aluno existe, se não existir lança uma exceção
     if (!alunoExiste) {
         throw new IllegalStateException("Aluno informado não existe.");
     }
@@ -94,4 +97,27 @@ public class MatriculaService {
 
         return matriculaCancelada;
     }
+
+    private boolean consultarExistenciaAluno(Long alunoId) {
+
+    try {
+        // Pergunta ao Aluno Service se o aluno existe
+        return alunoClient.alunoExiste(alunoId);
+
+    } catch (FeignException exception) {
+
+        // Registra o erro ocorrido durante a consulta
+        log.error(
+                "Falha ao consultar o aluno {} no Aluno Service: {}",
+                alunoId,
+                exception.getMessage()
+        );
+
+        // Informa que não foi possível acessar o Aluno Service
+        throw new AlunoServiceIndisponivelException(
+                "Não foi possível consultar o Aluno Service no momento.",
+                exception
+        );
+    }
+}
 }
