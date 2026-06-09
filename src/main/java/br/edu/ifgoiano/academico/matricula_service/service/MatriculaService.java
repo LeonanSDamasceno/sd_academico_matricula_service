@@ -8,7 +8,22 @@ import br.edu.ifgoiano.academico.matricula_service.repository.MatriculaRepositor
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+
+
+import br.edu.ifgoiano.grpc.ReservaVagaRequest;
+import br.edu.ifgoiano.grpc.ReservaVagaResponse;
+
+import br.edu.ifgoiano.grpc.LiberaVagaRequest;
+import br.edu.ifgoiano.grpc.LiberaVagaResponse;
+import br.edu.ifgoiano.grpc.TurmaGrpcServiceGrpc;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import br.edu.ifgoiano.academico.matricula_service.client.AlunoClient;
+
+import br.edu.ifgoiano.academico.matricula_service.service.exception.AlunoServiceIndisponivelException;
+import feign.FeignException;
 
 import java.util.List;
 
@@ -26,6 +41,19 @@ public class MatriculaService {
         this.matriculaRepository = matriculaRepository;
         this.rabbitTemplate = rabbitTemplate;
         this.notificationProducer = notificationProducer;
+    private static final Logger log = LoggerFactory.getLogger(MatriculaService.class);
+
+    private final MatriculaRepository matriculaRepository;
+    private final AlunoClient alunoClient;
+    private final TurmaGrpcServiceGrpc.TurmaGrpcServiceBlockingStub turmaGrpcStub;
+
+    public MatriculaService(
+            MatriculaRepository matriculaRepository,
+            AlunoClient alunoClient,
+            TurmaGrpcServiceGrpc.TurmaGrpcServiceBlockingStub turmaGrpcStub) {
+        this.matriculaRepository = matriculaRepository;
+        this.alunoClient = alunoClient;
+        this.turmaGrpcStub = turmaGrpcStub;
     }
 
 
@@ -38,6 +66,16 @@ public class MatriculaService {
                         turmaId,
                         StatusMatricula.ATIVA
                 );
+        boolean alunoExiste = consultarExistenciaAluno(alunoId);
+        // verifica se aluno existe, se não existir lança uma exceção
+        if (!alunoExiste) {
+            throw new IllegalStateException("Aluno informado não existe.");
+        }
+
+        boolean jaExisteMatriculaAtiva = matriculaRepository.existsByAlunoIdAndTurmaIdAndStatus(
+                alunoId,
+                turmaId,
+                StatusMatricula.ATIVA);
 
         if (jaExisteMatriculaAtiva) {
             logger.warn("[MATRICULA-SERVICE] Aluno {} já possui matrícula ativa na turma {}", alunoId, turmaId);
@@ -52,6 +90,18 @@ public class MatriculaService {
 
         rabbitTemplate.convertAndSend("fila.notificacoes", mensagem);
 
+        // Pede ao Turma Service para reservar uma vaga na turma via gRPC
+        ReservaVagaResponse reserva = turmaGrpcStub.reservarVaga(
+                ReservaVagaRequest.newBuilder()
+                        .setTurmaId(turmaId)
+                        .build());
+
+        // Interrompe a matrícula se não for possível reservar a vaga
+        if (!reserva.getSucesso()) {
+            throw new IllegalStateException("Não foi possível reservar vaga na turma: " + reserva.getMensagem());
+        }
+
+        // Cria e salva a matrícula depois que a vaga foi reservada
         Matricula matricula = new Matricula(alunoId, turmaId);
         Matricula salva = matriculaRepository.save(matricula);
 
@@ -59,6 +109,8 @@ public class MatriculaService {
                 salva.getId(), alunoId, turmaId);
 
         return salva;
+        return matriculaRepository.save(matricula);
+
     }
 
     public List<Matricula> listarTodas() {
@@ -94,5 +146,46 @@ public class MatriculaService {
                 cancelada.getId(), alunoId, turmaId);
 
         return cancelada;
+                        StatusMatricula.ATIVA)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Não existe matrícula ativa para este aluno nesta turma."));
+
+        matricula.cancelar();
+        Matricula matriculaCancelada = matriculaRepository.save(matricula);
+
+        // Libera a vaga na turma via gRPC após cancelar a matrícula
+        LiberaVagaResponse liberacao = turmaGrpcStub.liberarVaga(
+                LiberaVagaRequest.newBuilder()
+                        .setTurmaId(turmaId)
+                        .build());
+
+        if (!liberacao.getSucesso()) {
+            // Não reverte o cancelamento; apenas registra a inconsistência
+            log.warn("Falha ao liberar vaga na turma {}: {}", turmaId, liberacao.getMensagem());
+        }
+
+        return matriculaCancelada;
+    }
+
+    private boolean consultarExistenciaAluno(Long alunoId) {
+
+        try {
+            // Pergunta ao Aluno Service se o aluno existe
+            return alunoClient.alunoExiste(alunoId);
+
+        } catch (FeignException exception) {
+
+            // Registra o erro ocorrido durante a consulta
+            log.error(
+                    "Falha ao consultar o aluno {} no Aluno Service: {}",
+                    alunoId,
+                    exception.getMessage());
+
+            // Informa que não foi possível acessar o Aluno Service
+            throw new AlunoServiceIndisponivelException(
+                    "Não foi possível consultar o Aluno Service no momento.",
+                    exception);
+        }
+
     }
 }
