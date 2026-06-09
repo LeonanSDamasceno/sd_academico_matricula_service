@@ -8,7 +8,6 @@ import br.edu.ifgoiano.grpc.LiberaVagaRequest;
 import br.edu.ifgoiano.grpc.LiberaVagaResponse;
 import br.edu.ifgoiano.grpc.TurmaGrpcServiceGrpc;
 
-import net.devh.boot.grpc.client.inject.GrpcClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -23,13 +22,15 @@ public class MatriculaService {
 
     private final MatriculaRepository matriculaRepository;
     private final AlunoClient alunoClient;
+    private final TurmaGrpcServiceGrpc.TurmaGrpcServiceBlockingStub turmaGrpcStub;
 
-    @GrpcClient("turma-service")
-    private TurmaGrpcServiceGrpc.TurmaGrpcServiceBlockingStub turmaGrpcStub;
-
-    public MatriculaService(MatriculaRepository matriculaRepository, AlunoClient alunoClient) {
+    public MatriculaService(
+            MatriculaRepository matriculaRepository,
+            AlunoClient alunoClient,
+            TurmaGrpcServiceGrpc.TurmaGrpcServiceBlockingStub turmaGrpcStub) {
         this.matriculaRepository = matriculaRepository;
         this.alunoClient = alunoClient;
+        this.turmaGrpcStub = turmaGrpcStub;
     }
 
     public Matricula criarMatricula(Long alunoId, Long turmaId) {
