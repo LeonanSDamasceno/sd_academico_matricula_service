@@ -1,32 +1,28 @@
 package br.edu.ifgoiano.academico.matricula_service.client;
 
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestClientException;
+import org.springframework.cloud.openfeign.FeignClient;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 
-@Component
-public class AlunoClient {
+/**
+ * Cliente HTTP responsável pela comunicação com o aluno-service.
+ *
+ * O OpenFeign cria automaticamente a implementação desta interface.
+ * O nome "aluno-service" deve ser igual ao spring.application.name
+ * configurado no microsserviço de alunos.
+ */
 
-    private final RestClient restClient;
-
-    public AlunoClient(@Value("${aluno.service.url}") String alunoServiceUrl) {
-        this.restClient = RestClient.builder()
-                .baseUrl(alunoServiceUrl)
-                .build();
-    }
-
-    public boolean alunoExiste(Long alunoId) {
-        try {
-            Boolean existe = restClient
-                    .get()
-                    .uri("/alunos/{id}/existe", alunoId)
-                    .retrieve()
-                    .body(Boolean.class);
-
-            return Boolean.TRUE.equals(existe);
-        } catch (RestClientException exception) {
-            throw new IllegalStateException("Não foi possível validar o aluno no aluno-service.");
-        }
-    }
+@FeignClient(name="aluno-service")
+public interface AlunoClient{
+     /**
+     * Consulta o aluno-service para verificar se um aluno existe.
+     *
+     * A chamada corresponde a:
+     * GET /alunos/{id}/existe
+     *
+     * @param alunoId identificador do aluno
+     * @return true se o aluno existir; false caso contrário
+     */
+    @GetMapping("/alunos/{id}/existe")
+    boolean alunoExiste(@PathVariable("id") Long alunoId);
 }
