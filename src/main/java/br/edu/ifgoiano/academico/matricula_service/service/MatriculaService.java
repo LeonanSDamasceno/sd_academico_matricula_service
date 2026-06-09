@@ -6,11 +6,11 @@ import br.edu.ifgoiano.academico.matricula_service.repository.MatriculaRepositor
 
 import br.edu.ifgoiano.grpc.LiberaVagaRequest;
 import br.edu.ifgoiano.grpc.LiberaVagaResponse;
-import br.edu.ifgoiano.grpc.ReservaVagaRequest;
-import br.edu.ifgoiano.grpc.ReservaVagaResponse;
 import br.edu.ifgoiano.grpc.TurmaGrpcServiceGrpc;
 
 import net.devh.boot.grpc.client.inject.GrpcClient;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import br.edu.ifgoiano.academico.matricula_service.client.AlunoClient;
 
@@ -19,7 +19,13 @@ import java.util.List;
 @Service
 public class MatriculaService {
 
+    private static final Logger log = LoggerFactory.getLogger(MatriculaService.class);
+
     private final MatriculaRepository matriculaRepository;
+    private final AlunoClient alunoClient;
+
+    @GrpcClient("turma-service")
+    private TurmaGrpcServiceGrpc.TurmaGrpcServiceBlockingStub turmaGrpcStub;
 
     public MatriculaService(MatriculaRepository matriculaRepository, AlunoClient alunoClient) {
         this.matriculaRepository = matriculaRepository;
@@ -82,10 +88,7 @@ public class MatriculaService {
 
         if (!liberacao.getSucesso()) {
             // Não reverte o cancelamento; apenas registra a inconsistência
-            System.err.println(
-                    "Aviso: falha ao liberar vaga na turma " + turmaId
-                            + ": " + liberacao.getMensagem()
-            );
+            log.warn("Falha ao liberar vaga na turma {}: {}", turmaId, liberacao.getMensagem());
         }
 
         return matriculaCancelada;
