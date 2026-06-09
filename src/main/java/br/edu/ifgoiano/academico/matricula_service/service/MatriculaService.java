@@ -4,6 +4,9 @@ import br.edu.ifgoiano.academico.matricula_service.model.Matricula;
 import br.edu.ifgoiano.academico.matricula_service.model.StatusMatricula;
 import br.edu.ifgoiano.academico.matricula_service.repository.MatriculaRepository;
 
+import br.edu.ifgoiano.grpc.ReservaVagaRequest;
+import br.edu.ifgoiano.grpc.ReservaVagaResponse;
+
 import br.edu.ifgoiano.grpc.LiberaVagaRequest;
 import br.edu.ifgoiano.grpc.LiberaVagaResponse;
 import br.edu.ifgoiano.grpc.TurmaGrpcServiceGrpc;
@@ -37,26 +40,37 @@ public class MatriculaService {
     }
 
     public Matricula criarMatricula(Long alunoId, Long turmaId) {
-    boolean alunoExiste = consultarExistenciaAluno(alunoId);
-        //verifica se aluno existe, se não existir lança uma exceção
-    if (!alunoExiste) {
-        throw new IllegalStateException("Aluno informado não existe.");
-    }
+        boolean alunoExiste = consultarExistenciaAluno(alunoId);
+        // verifica se aluno existe, se não existir lança uma exceção
+        if (!alunoExiste) {
+            throw new IllegalStateException("Aluno informado não existe.");
+        }
 
-    boolean jaExisteMatriculaAtiva =
-            matriculaRepository.existsByAlunoIdAndTurmaIdAndStatus(
-                    alunoId,
-                    turmaId,
-                    StatusMatricula.ATIVA
-            );
+        boolean jaExisteMatriculaAtiva = matriculaRepository.existsByAlunoIdAndTurmaIdAndStatus(
+                alunoId,
+                turmaId,
+                StatusMatricula.ATIVA);
 
-    if (jaExisteMatriculaAtiva) {
-        throw new IllegalStateException("Aluno já possui matrícula ativa nesta turma.");
-    }
+        if (jaExisteMatriculaAtiva) {
+            throw new IllegalStateException("Aluno já possui matrícula ativa nesta turma.");
+        }
 
+        // Pede ao Turma Service para reservar uma vaga na turma via gRPC
+        ReservaVagaResponse reserva = turmaGrpcStub.reservarVaga(
+                ReservaVagaRequest.newBuilder()
+                        .setTurmaId(turmaId)
+                        .build());
+
+        // Interrompe a matrícula se não for possível reservar a vaga
+        if (!reserva.getSucesso()) {
+            throw new IllegalStateException("Não foi possível reservar vaga na turma: " + reserva.getMensagem());
+        }
+
+        // Cria e salva a matrícula depois que a vaga foi reservada
         Matricula matricula = new Matricula(alunoId, turmaId);
 
         return matriculaRepository.save(matricula);
+
     }
 
     public List<Matricula> listarTodas() {
@@ -87,8 +101,7 @@ public class MatriculaService {
         LiberaVagaResponse liberacao = turmaGrpcStub.liberarVaga(
                 LiberaVagaRequest.newBuilder()
                         .setTurmaId(turmaId)
-                        .build()
-        );
+                        .build());
 
         if (!liberacao.getSucesso()) {
             // Não reverte o cancelamento; apenas registra a inconsistência
@@ -100,24 +113,22 @@ public class MatriculaService {
 
     private boolean consultarExistenciaAluno(Long alunoId) {
 
-    try {
-        // Pergunta ao Aluno Service se o aluno existe
-        return alunoClient.alunoExiste(alunoId);
+        try {
+            // Pergunta ao Aluno Service se o aluno existe
+            return alunoClient.alunoExiste(alunoId);
 
-    } catch (FeignException exception) {
+        } catch (FeignException exception) {
 
-        // Registra o erro ocorrido durante a consulta
-        log.error(
-                "Falha ao consultar o aluno {} no Aluno Service: {}",
-                alunoId,
-                exception.getMessage()
-        );
+            // Registra o erro ocorrido durante a consulta
+            log.error(
+                    "Falha ao consultar o aluno {} no Aluno Service: {}",
+                    alunoId,
+                    exception.getMessage());
 
-        // Informa que não foi possível acessar o Aluno Service
-        throw new AlunoServiceIndisponivelException(
-                "Não foi possível consultar o Aluno Service no momento.",
-                exception
-        );
+            // Informa que não foi possível acessar o Aluno Service
+            throw new AlunoServiceIndisponivelException(
+                    "Não foi possível consultar o Aluno Service no momento.",
+                    exception);
+        }
     }
-}
 }
